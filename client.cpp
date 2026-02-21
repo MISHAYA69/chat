@@ -42,7 +42,7 @@ int main(int argc, char* argv[]) {
     }
     if (name.empty()) name = "Anonymous";
 
-    // Отправляем имя (добавляем '\n' для удобства сервера)
+    // Отправляем имя
     send(sock, (name + "\n").c_str(), name.size() + 1, 0);
     std::cout << "Connected as " << name << ". Type 'exit' to quit.\n";
 
@@ -51,10 +51,19 @@ int main(int argc, char* argv[]) {
     while (true) {
         std::cout << "> ";
         std::getline(std::cin, input);
-        if (input == "exit") break;
+        
+        // Отправляем сообщение на сервер
         send(sock, (input + "\n").c_str(), input.size() + 1, 0);
+        
+        if (input == "exit") {
+            std::cout << "Disconnecting...\n";
+            break;
+        }
     }
 
+    // Даем время серверу обработать отключение
+    Sleep(100);
+    
     closesocket(sock);
     WSACleanup();
     return 0;

@@ -128,11 +128,15 @@ void removeClient(SOCKET sock) {
 
 // Освобождение ресурсов
 void cleanup() {
+    std::cout << "\nCleaning up resources...\n";
     for (auto& client : clients) {
         closesocket(client.socket);
     }
     clients.clear();
-    if (listen_sock != INVALID_SOCKET) closesocket(listen_sock);
+    if (listen_sock != INVALID_SOCKET) {
+        closesocket(listen_sock);
+        listen_sock = INVALID_SOCKET;
+    }
     WSACleanup();
 }
 
@@ -150,8 +154,9 @@ int main() {
     }
 
     std::string cmd_buffer;
+    bool running = true;
 
-    while (true) {
+    while (running) {
         fd_set readfds;
         FD_ZERO(&readfds);
         FD_SET(listen_sock, &readfds);
@@ -168,47 +173,51 @@ int main() {
 
         int activity = select(0, &readfds, nullptr, nullptr, &tv);
         if (activity == SOCKET_ERROR) {
-            std::cerr << "select error: " << WSAGetLastError() << std::endl;
-            break;
+            int error = WSAGetLastError();
+            if (error != WSAEINTR) { // Ignore interrupt errors
+                std::cerr << "select error: " << error << std::endl;
+                break;
+            }
         }
 
         // 1. Новое подключение
-        if (FD_ISSET(listen_sock, &readfds)) {
+        if (activity > 0 && FD_ISSET(listen_sock, &readfds)) {
             acceptNewClient();
         }
 
         // 2. Данные от клиентов (сообщения или отключение)
-        for (auto it = clients.begin(); it != clients.end(); ) {
-            SOCKET sock = it->socket;
+        // Используем индексы вместо итераторов для безопасного удаления
+        for (int i = clients.size() - 1; i >= 0; --i) {
+            SOCKET sock = clients[i].socket;
             if (FD_ISSET(sock, &readfds)) {
                 char buffer[BUFFER_SIZE];
                 int bytes = recv(sock, buffer, BUFFER_SIZE - 1, 0);
                 if (bytes <= 0) {
                     // Клиент разорвал соединение
-                    SOCKET tmp = sock;
-                    ++it;
-                    removeClient(tmp);
+                    removeClient(sock);
+                    // После удаления клиента, нужно перезапустить цикл
+                    // так как размер вектора изменился
                     continue;
                 } else {
-                    // *** ВСТАВЛЕННЫЙ БЛОК: ОБРАБОТКА СООБЩЕНИЙ ***
                     buffer[bytes] = '\0';
                     std::string msg(buffer);
                     // Удаляем символы перевода строки
                     msg.erase(std::remove(msg.begin(), msg.end(), '\n'), msg.end());
                     msg.erase(std::remove(msg.begin(), msg.end(), '\r'), msg.end());
+                    
                     if (!msg.empty()) {
-                        // Найти имя клиента по сокету
-                        auto ci = std::find_if(clients.begin(), clients.end(),
-                                               [sock](const ClientInfo& c) { return c.socket == sock; });
-                        if (ci != clients.end()) {
-                            std::cout << "\n[" << ci->name << "]: " << msg << "\n> ";
+                        // Проверяем, не является ли сообщение командой от клиента
+                        if (msg == "exit") {
+                            std::cout << "\nClient " << clients[i].name << " sent exit command\n";
+                            removeClient(sock);
+                            continue;
+                        } else {
+                            std::cout << "\n[" << clients[i].name << "]: " << msg << "\n> ";
                             fflush(stdout);
                         }
                     }
-                    // **********************************************
                 }
             }
-            ++it;
         }
 
         // 3. Неблокирующий ввод команд с клавиатуры
@@ -218,8 +227,8 @@ int main() {
                 if (!cmd_buffer.empty()) {
                     if (cmd_buffer == "quit") {
                         std::cout << "\nShutting down server...\n";
-                        cleanup();
-                        return 0;
+                        running = false;
+                        break;
                     } else if (cmd_buffer == "list") {
                         printClientList();
                     } else {
