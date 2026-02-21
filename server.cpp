@@ -29,6 +29,7 @@ void printClientList();
 void acceptNewClient();
 void removeClient(SOCKET sock);
 void cleanup();
+void printServerIPs(); // новая функция
 
 // ---------- Определения функций ----------
 
@@ -68,7 +69,23 @@ bool createListeningSocket() {
     return true;
 }
 
-// Вывод списка подключённых клиентов
+void printServerIPs() {
+    char hostname[256];
+    if (gethostname(hostname, sizeof(hostname)) == 0) {
+        struct hostent* host = gethostbyname(hostname);
+        if (host) {
+            std::cout << "Server IP addresses:\n";
+            for (int i = 0; host->h_addr_list[i] != nullptr; ++i) {
+                struct in_addr addr;
+                memcpy(&addr, host->h_addr_list[i], sizeof(addr));
+                std::cout << "  " << inet_ntoa(addr) << "\n";
+            }
+        }
+    } else {
+        std::cout << "Could not determine server IPs.\n";
+    }
+}
+
 void printClientList() {
     std::cout << "\n--- Connected clients (" << clients.size() << ") ---\n";
     if (clients.empty()) {
@@ -84,7 +101,6 @@ void printClientList() {
     fflush(stdout);
 }
 
-// Принять нового клиента, получить имя и добавить в список
 void acceptNewClient() {
     sockaddr_in clientAddr{};
     int addrLen = sizeof(clientAddr);
@@ -103,7 +119,6 @@ void acceptNewClient() {
     }
     buffer[bytes] = '\0';
     std::string name(buffer);
-    // Удалить '\n', '\r' в конце
     name.erase(std::remove(name.begin(), name.end(), '\n'), name.end());
     name.erase(std::remove(name.begin(), name.end(), '\r'), name.end());
 
@@ -114,7 +129,6 @@ void acceptNewClient() {
     printClientList();
 }
 
-// Удалить клиента из списка (при отключении)
 void removeClient(SOCKET sock) {
     auto it = std::find_if(clients.begin(), clients.end(),
                            [sock](const ClientInfo& ci) { return ci.socket == sock; });
@@ -126,7 +140,6 @@ void removeClient(SOCKET sock) {
     }
 }
 
-// Освобождение ресурсов
 void cleanup() {
     std::cout << "\nCleaning up resources...\n";
     for (auto& client : clients) {
@@ -144,14 +157,16 @@ void cleanup() {
 int main() {
     SetConsoleOutputCP(CP_UTF8);
     std::cout << "=== TCP Client Manager ===\n";
-    std::cout << "Listening on port " << PORT << "\n";
-    std::cout << "Commands: 'quit' - exit server, 'list' - show clients\n\n";
-
+    
     if (!initWinsock()) return 1;
     if (!createListeningSocket()) {
         WSACleanup();
         return 1;
     }
+
+    printServerIPs(); // выводим IP сервера
+    std::cout << "Listening on port " << PORT << "\n";
+    std::cout << "Commands: 'quit' - exit server, 'list' - show clients\n\n";
 
     std::string cmd_buffer;
     bool running = true;
@@ -174,7 +189,7 @@ int main() {
         int activity = select(0, &readfds, nullptr, nullptr, &tv);
         if (activity == SOCKET_ERROR) {
             int error = WSAGetLastError();
-            if (error != WSAEINTR) { // Ignore interrupt errors
+            if (error != WSAEINTR) {
                 std::cerr << "select error: " << error << std::endl;
                 break;
             }
@@ -185,28 +200,22 @@ int main() {
             acceptNewClient();
         }
 
-        // 2. Данные от клиентов (сообщения или отключение)
-        // Используем индексы вместо итераторов для безопасного удаления
+        // 2. Данные от клиентов
         for (int i = clients.size() - 1; i >= 0; --i) {
             SOCKET sock = clients[i].socket;
             if (FD_ISSET(sock, &readfds)) {
                 char buffer[BUFFER_SIZE];
                 int bytes = recv(sock, buffer, BUFFER_SIZE - 1, 0);
                 if (bytes <= 0) {
-                    // Клиент разорвал соединение
                     removeClient(sock);
-                    // После удаления клиента, нужно перезапустить цикл
-                    // так как размер вектора изменился
                     continue;
                 } else {
                     buffer[bytes] = '\0';
                     std::string msg(buffer);
-                    // Удаляем символы перевода строки
                     msg.erase(std::remove(msg.begin(), msg.end(), '\n'), msg.end());
                     msg.erase(std::remove(msg.begin(), msg.end(), '\r'), msg.end());
-                    
+
                     if (!msg.empty()) {
-                        // Проверяем, не является ли сообщение командой от клиента
                         if (msg == "exit") {
                             std::cout << "\nClient " << clients[i].name << " sent exit command\n";
                             removeClient(sock);
@@ -220,7 +229,7 @@ int main() {
             }
         }
 
-        // 3. Неблокирующий ввод команд с клавиатуры
+        // 3. Ввод команд с клавиатуры
         while (_kbhit()) {
             char ch = _getch();
             if (ch == '\r' || ch == '\n') {
