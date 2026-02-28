@@ -5,7 +5,6 @@
 #include <cstring>
 #include <conio.h>      // _kbhit, _getch
 #include <windows.h>
-
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
@@ -14,9 +13,65 @@
 #define PORT 8888
 #define BUFFER_SIZE 256
 
+// Функция для конвертации UTF-8 в CP866
+std::string utf8_to_cp866(const std::string& utf8_str) {
+    if (utf8_str.empty()) return "";
+    
+    // UTF-8 -> UTF-16
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8_str.c_str(), -1, NULL, 0);
+    if (wlen == 0) return utf8_str;
+    
+    wchar_t* wstr = new wchar_t[wlen];
+    MultiByteToWideChar(CP_UTF8, 0, utf8_str.c_str(), -1, wstr, wlen);
+    
+    // UTF-16 -> CP866
+    int clen = WideCharToMultiByte(866, 0, wstr, -1, NULL, 0, NULL, NULL);
+    if (clen == 0) {
+        delete[] wstr;
+        return utf8_str;
+    }
+    
+    char* cstr = new char[clen];
+    WideCharToMultiByte(866, 0, wstr, -1, cstr, clen, NULL, NULL);
+    
+    std::string result(cstr);
+    delete[] wstr;
+    delete[] cstr;
+    
+    return result;
+}
+
+// Функция для конвертации CP866 в UTF-8
+std::string cp866_to_utf8(const std::string& cp866_str) {
+    if (cp866_str.empty()) return "";
+    
+    // CP866 -> UTF-16
+    int wlen = MultiByteToWideChar(866, 0, cp866_str.c_str(), -1, NULL, 0);
+    if (wlen == 0) return cp866_str;
+    
+    wchar_t* wstr = new wchar_t[wlen];
+    MultiByteToWideChar(866, 0, cp866_str.c_str(), -1, wstr, wlen);
+    
+    // UTF-16 -> UTF-8
+    int clen = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, NULL, 0, NULL, NULL);
+    if (clen == 0) {
+        delete[] wstr;
+        return cp866_str;
+    }
+    
+    char* cstr = new char[clen];
+    WideCharToMultiByte(CP_UTF8, 0, wstr, -1, cstr, clen, NULL, NULL);
+    
+    std::string result(cstr);
+    delete[] wstr;
+    delete[] cstr;
+    
+    return result;
+}
+
 struct ClientInfo {
     SOCKET socket;
-    std::string name;
+    std::string name;  // Храним в UTF-8
 };
 
 std::vector<ClientInfo> clients;
@@ -29,7 +84,7 @@ void printClientList();
 void acceptNewClient();
 void removeClient(SOCKET sock);
 void cleanup();
-void printServerIPs(); // новая функция
+void printServerIPs();
 
 // ---------- Определения функций ----------
 
@@ -74,7 +129,7 @@ void printServerIPs() {
     if (gethostname(hostname, sizeof(hostname)) == 0) {
         struct hostent* host = gethostbyname(hostname);
         if (host) {
-            std::cout << "Server IP addresses:\n";
+            std::cout << utf8_to_cp866("Server IP addresses:\n");
             for (int i = 0; host->h_addr_list[i] != nullptr; ++i) {
                 struct in_addr addr;
                 memcpy(&addr, host->h_addr_list[i], sizeof(addr));
@@ -82,22 +137,22 @@ void printServerIPs() {
             }
         }
     } else {
-        std::cout << "Could not determine server IPs.\n";
+        std::cout << utf8_to_cp866("Could not determine server IPs.\n");
     }
 }
 
 void printClientList() {
-    std::cout << "\n--- Connected clients (" << clients.size() << ") ---\n";
+    std::cout << utf8_to_cp866("\n--- Connected clients (") << clients.size() << utf8_to_cp866(") ---\n");
     if (clients.empty()) {
-        std::cout << "(none)\n";
+        std::cout << utf8_to_cp866("(none)\n");
     } else {
         for (size_t i = 0; i < clients.size(); ++i) {
-            std::cout << i + 1 << ". " << clients[i].name
-                      << " (socket " << clients[i].socket << ")\n";
+            std::cout << i + 1 << ". " << utf8_to_cp866(clients[i].name)
+                      << utf8_to_cp866(" (socket ") << clients[i].socket << ")\n";
         }
     }
-    std::cout << "--------------------------------\n";
-    std::cout << "> ";
+    std::cout << utf8_to_cp866("--------------------------------\n");
+    std::cout << utf8_to_cp866("> ");
     fflush(stdout);
 }
 
@@ -118,14 +173,15 @@ void acceptNewClient() {
         return;
     }
     buffer[bytes] = '\0';
-    std::string name(buffer);
+    std::string name(buffer); // Имя уже в UTF-8 от клиента
     name.erase(std::remove(name.begin(), name.end(), '\n'), name.end());
     name.erase(std::remove(name.begin(), name.end(), '\r'), name.end());
 
     if (name.empty()) name = "Anonymous";
 
     clients.push_back({client_sock, name});
-    std::cout << "\n[+] Client connected: " << name << " (socket " << client_sock << ")\n";
+    std::cout << utf8_to_cp866("\n[+] Client connected: ") << utf8_to_cp866(name) 
+              << utf8_to_cp866(" (socket ") << client_sock << ")\n";
     printClientList();
 }
 
@@ -133,7 +189,8 @@ void removeClient(SOCKET sock) {
     auto it = std::find_if(clients.begin(), clients.end(),
                            [sock](const ClientInfo& ci) { return ci.socket == sock; });
     if (it != clients.end()) {
-        std::cout << "\n[-] Client disconnected: " << it->name << " (socket " << sock << ")\n";
+        std::cout << utf8_to_cp866("\n[-] Client disconnected: ") << utf8_to_cp866(it->name) 
+                  << utf8_to_cp866(" (socket ") << sock << ")\n";
         closesocket(it->socket);
         clients.erase(it);
         printClientList();
@@ -141,7 +198,7 @@ void removeClient(SOCKET sock) {
 }
 
 void cleanup() {
-    std::cout << "\nCleaning up resources...\n";
+    std::cout << utf8_to_cp866("\nCleaning up resources...\n");
     for (auto& client : clients) {
         closesocket(client.socket);
     }
@@ -155,8 +212,11 @@ void cleanup() {
 
 // ---------- Главная функция ----------
 int main() {
-    SetConsoleOutputCP(CP_UTF8);
-    std::cout << "=== TCP Client Manager ===\n";
+    // Устанавливаем кодировку консоли на CP866 для корректного вывода
+    SetConsoleOutputCP(866);
+    SetConsoleCP(866);
+    
+    std::cout << utf8_to_cp866("=== TCP Client Manager ===\n");
     
     if (!initWinsock()) return 1;
     if (!createListeningSocket()) {
@@ -164,9 +224,9 @@ int main() {
         return 1;
     }
 
-    printServerIPs(); // выводим IP сервера
-    std::cout << "Listening on port " << PORT << "\n";
-    std::cout << "Commands: 'quit' - exit server, 'list' - show clients\n\n";
+    printServerIPs();
+    std::cout << utf8_to_cp866("Listening on port ") << PORT << "\n";
+    std::cout << utf8_to_cp866("Commands: 'quit' - exit server, 'list' - show clients\n\n");
 
     std::string cmd_buffer;
     bool running = true;
@@ -211,17 +271,20 @@ int main() {
                     continue;
                 } else {
                     buffer[bytes] = '\0';
-                    std::string msg(buffer);
+                    std::string msg(buffer); // Сообщение в UTF-8 от клиента
                     msg.erase(std::remove(msg.begin(), msg.end(), '\n'), msg.end());
                     msg.erase(std::remove(msg.begin(), msg.end(), '\r'), msg.end());
 
                     if (!msg.empty()) {
                         if (msg == "exit") {
-                            std::cout << "\nClient " << clients[i].name << " sent exit command\n";
+                            std::cout << utf8_to_cp866("\nClient ") << utf8_to_cp866(clients[i].name) 
+                                      << utf8_to_cp866(" sent exit command\n");
                             removeClient(sock);
                             continue;
                         } else {
-                            std::cout << "\n[" << clients[i].name << "]: " << msg << "\n> ";
+                            // Конвертируем сообщение из UTF-8 в CP866 для вывода
+                            std::cout << utf8_to_cp866("\n[") << utf8_to_cp866(clients[i].name) 
+                                      << utf8_to_cp866("]: ") << utf8_to_cp866(msg) << "\n> ";
                             fflush(stdout);
                         }
                     }
@@ -235,13 +298,13 @@ int main() {
             if (ch == '\r' || ch == '\n') {
                 if (!cmd_buffer.empty()) {
                     if (cmd_buffer == "quit") {
-                        std::cout << "\nShutting down server...\n";
+                        std::cout << utf8_to_cp866("\nShutting down server...\n");
                         running = false;
                         break;
                     } else if (cmd_buffer == "list") {
                         printClientList();
                     } else {
-                        std::cout << "\nUnknown command: " << cmd_buffer << "\n> ";
+                        std::cout << utf8_to_cp866("\nUnknown command: ") << cmd_buffer << "\n> ";
                         fflush(stdout);
                     }
                     cmd_buffer.clear();
