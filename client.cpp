@@ -1,26 +1,27 @@
 #include <iostream>
 #include <string>
-#include <algorithm>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
-#include <thread>
+#include <locale>
+#include <codecvt>
 #pragma comment(lib, "ws2_32.lib")
 
 #define PORT 8888
 #define DEFAULT_SERVER "127.0.0.1"
-#define BUFFER_SIZE 256
 
 // Функция для конвертации UTF-8 в CP866
 std::string utf8_to_cp866(const std::string& utf8_str) {
     if (utf8_str.empty()) return "";
     
+    // UTF-8 -> UTF-16
     int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8_str.c_str(), -1, NULL, 0);
     if (wlen == 0) return utf8_str;
     
     wchar_t* wstr = new wchar_t[wlen];
     MultiByteToWideChar(CP_UTF8, 0, utf8_str.c_str(), -1, wstr, wlen);
     
+    // UTF-16 -> CP866
     int clen = WideCharToMultiByte(866, 0, wstr, -1, NULL, 0, NULL, NULL);
     if (clen == 0) {
         delete[] wstr;
@@ -41,12 +42,14 @@ std::string utf8_to_cp866(const std::string& utf8_str) {
 std::string cp866_to_utf8(const std::string& cp866_str) {
     if (cp866_str.empty()) return "";
     
+    // CP866 -> UTF-16
     int wlen = MultiByteToWideChar(866, 0, cp866_str.c_str(), -1, NULL, 0);
     if (wlen == 0) return cp866_str;
     
     wchar_t* wstr = new wchar_t[wlen];
     MultiByteToWideChar(866, 0, cp866_str.c_str(), -1, wstr, wlen);
     
+    // UTF-16 -> UTF-8
     int clen = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, NULL, 0, NULL, NULL);
     if (clen == 0) {
         delete[] wstr;
@@ -63,33 +66,8 @@ std::string cp866_to_utf8(const std::string& cp866_str) {
     return result;
 }
 
-// Функция для приема сообщений в отдельном потоке
-void receiveMessages(SOCKET sock) {
-    char buffer[BUFFER_SIZE];
-    while (true) {
-        int bytes = recv(sock, buffer, BUFFER_SIZE - 1, 0);
-        if (bytes <= 0) {
-            std::cout << utf8_to_cp866("\nConnection to server lost.\n");
-            break;
-        }
-        
-        buffer[bytes] = '\0';
-        std::string msg(buffer);
-        // Явно указываем std::remove из <algorithm>
-        msg.erase(std::remove(msg.begin(), msg.end(), '\n'), msg.end());
-        msg.erase(std::remove(msg.begin(), msg.end(), '\r'), msg.end());
-        
-        // Очищаем текущую строку ввода
-        std::cout << "\r" << std::string(50, ' ') << "\r";
-        // Выводим полученное сообщение
-        std::cout << utf8_to_cp866(msg) << std::endl;
-        // Возвращаем приглашение к вводу
-        std::cout << utf8_to_cp866("> ") << std::flush;
-    }
-}
-
 int main(int argc, char* argv[]) {
-    // Устанавливаем кодировку консоли
+    // Устанавливаем кодировку консоли на CP866 для корректного ввода/вывода
     SetConsoleOutputCP(866);
     SetConsoleCP(866);
     
@@ -104,9 +82,10 @@ int main(int argc, char* argv[]) {
 
     // Разбор аргументов командной строки
     if (argc > 1) {
+        // Аргументы командной строки обычно в CP866, конвертируем в UTF-8
         name = cp866_to_utf8(argv[1]);
         if (argc > 2) {
-            server_ip = argv[2];
+            server_ip = argv[2]; // IP адрес не конвертируем
         }
     } else {
         std::cout << utf8_to_cp866("Enter your name: ");
@@ -147,15 +126,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Отправляем имя серверу
+    // Отправляем имя серверу (в UTF-8)
     send(sock, (name + "\n").c_str(), name.size() + 1, 0);
     
-    std::cout << utf8_to_cp866("Connected to chat as ") << utf8_to_cp866(name) << std::endl;
-    std::cout << utf8_to_cp866("Type 'exit' to quit.\n\n");
-
-    // Запускаем поток для приема сообщений
-    std::thread receiver(receiveMessages, sock);
-    receiver.detach();
+    std::cout << utf8_to_cp866("Connected as ") << utf8_to_cp866(name) 
+              << utf8_to_cp866(" to server ") << server_ip 
+              << utf8_to_cp866(". Type 'exit' to quit.\n");
 
     // Цикл отправки сообщений
     std::string input;
@@ -163,6 +139,7 @@ int main(int argc, char* argv[]) {
         std::cout << utf8_to_cp866("> ");
         std::getline(std::cin, input);
         
+        // Конвертируем ввод из CP866 в UTF-8 перед отправкой
         std::string utf8_input = cp866_to_utf8(input);
         send(sock, (utf8_input + "\n").c_str(), utf8_input.size() + 1, 0);
 
